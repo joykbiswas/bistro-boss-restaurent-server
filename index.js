@@ -45,7 +45,7 @@ async function run() {
 
     // middleware
     const verifyToken = (req, res, next) =>{
-      console.log('inside verifyToken',req.headers.authorization);
+      // console.log('inside verifyToken',req.headers.authorization);
       if(!req.headers.authorization){
         return res.status(401).send({message: 'unauthorized access'});
       }
@@ -221,6 +221,74 @@ async function run() {
       const deleteResult = await cartCollection.deleteMany(query);
     res.send({paymentResult, deleteResult});
     })
+
+    // starts or analytics
+    app.get('/admin-stats',verifyToken,verifyAdmin,  async(req, res) =>{
+      const users = await userCollection.estimatedDocumentCount();
+      const menuItem =await menuCollection.estimatedDocumentCount();
+      const orders = await paymentCollection.estimatedDocumentCount();
+
+      // const payments = await paymentCollection.find().toArray();
+      // const revenue = payments.reduce((total, payment) => total+ payment.price,0);
+
+      const result = await paymentCollection.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalRevenue: {
+              $sum: '$price'
+            }
+          }
+        }
+      ]).toArray();
+      const revenue = result.length > 0 ? result[0].totalRevenue : 0;
+      res.send({
+        users,
+        menuItem,
+        orders,
+        revenue
+
+      })
+    })
+
+    // using aggregate pipeline
+    app.get('/order-stats', async(req, res) =>{
+      const result = await paymentCollection.aggregate([
+        {
+          $unwind: '$menuItemIds'
+        },
+        {
+          $lookup:{
+            from: 'menu',
+            localField:'menuItemIds',
+            foreignField: '_id',
+            as: 'menuItems'
+           
+          }
+        },
+        {
+          $unwind: '$menuItems'
+        },
+        {
+          $group: {
+            _id: '$menuItems.category',
+            quantity: {$sum: 1},
+            revenue: {$sum: '$menuItems.price'}
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            category: '$_id',
+            quantity: '$quantity',
+            revenue: '$revenue'
+          }
+        }
+      ]).toArray();
+      res.send(result);
+    })
+
+
 
     // payment history show valid user 
     app.get('/payments/:email',verifyToken, async(req, res) =>{
